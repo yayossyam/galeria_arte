@@ -1,0 +1,98 @@
+body {
+    background: #fafafa;
+}
+
+/* CONTENEDOR PRINCIPAL PARA CENTRAR TODO */
+.main-container {
+    max-width: 1200px; /* Ancho máximo para que no se estire demasiado */
+    margin: 0 auto;    /* Centra el contenedor en la pantalla */
+    padding: 0 20px;
+}
+
+.section-title {
+    font-size: 36px;       /* Un poco más grande */
+    font-weight: bold;
+    margin-top: 80px;      /* MÁS ESPACIO SUPERIOR (Separa títulos) */
+    margin-bottom: 40px;   /* Espacio debajo del título */
+    text-align: center;
+    color: #333;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.home-description {
+    text-align: center;
+    max-width: 800px;
+    margin: 0 auto 60px auto; /* Más margen abajo */
+    font-size: 20px;
+    color: #555;
+    line-height: 1.6;
+}
+
+/* ESTILOS DE LAS CAJAS / IMÁGENES */
+.multi-item .carousel-item {
+    padding: 10px;
+}
+
+.multi-item .item-box {
+    background: white;
+    border-radius: 15px;
+    /* AUMENTO DE TAMAÑO AQUÍ */
+    height: 400px;        
+    display: flex;
+    flex-direction: column; /* Para que texto e imagen se apilen bien en artistas/cat */
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    transition: transform 0.3s ease;
+    overflow: hidden;
+    margin: 0 10px; /* Espacio entre tarjetas */
+}
+
+/* Efecto al pasar el mouse */
+.multi-item .item-box:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+}
+
+.placeholder-icon {
+    font-size: 100px; /* Icono más grande */
+    color: #ddd;
+}
+
+.carrusel-img {
+    width: 100%;
+    /* AUMENTO DE TAMAÑO AQUÍ PARA COINCIDIR CON LA CAJA */
+    height: 400px; 
+    object-fit: cover;
+    border-radius: 15px;
+}
+
+.artist-img {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 20px;
+}
+
+/* ESTILO DE LAS FLECHAS (CONTROLES) */
+.carousel-control-prev, .carousel-control-next {
+    width: 5%; /* Reducir el área de clic para que no estorbe */
+    filter: invert(100%); /* Vuelve las flechas NEGRAS para que se vean */
+    opacity: 0.7;
+}
+
+.carousel-control-prev {
+    left: -60px; /* Saca la flecha a la izquierda */
+}
+
+.carousel-control-next {
+    right: -60px; /* Saca la flecha a la derecha */
+}
+
+/* Ajuste para que las flechas no se salgan en pantallas pequeñas */
+@media (max-width: 1300px) {
+    .carousel-control-prev { left: 0; }
+    .carousel-control-next { right: 0; }
+}

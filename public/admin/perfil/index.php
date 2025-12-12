@@ -1,0 +1,373 @@
+<?php
+require_once __DIR__ . '/../../../app/config/config.php';
+
+// 1. INICIAR SESIÓN
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
+// 2. SEGURIDAD
+if(!isset($_SESSION['ROLE']) || $_SESSION['ROLE'] != 1) {
+    header("Location: " . BASE_URL . "public/login.php");
+    exit;
+}
+
+$id_user = $_SESSION['ID_USER'];
+
+// --- 2.1 AJAX PARA VERIFICAR CONTRASEÑA ACTUAL EN TIEMPO REAL ---
+// Esto permite que JS pregunte si la contraseña es correcta para poner la paloma
+if (isset($_POST['ajax_verify_pass'])) {
+    header('Content-Type: application/json');
+    $passToCheck = $_POST['ajax_verify_pass'];
+    
+    $stmt = $pdo->prepare("SELECT PASS FROM USERS WHERE ID_USER = :id");
+    $stmt->execute([':id' => $id_user]);
+    $currentUser = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    // Verificamos si coincide (Asumiendo que usas texto plano según tu esquema anterior, 
+    // pero si usas password_hash cambia '==' por 'password_verify($passToCheck, $currentUser['PASS'])')
+    // MODO SEGURO (Recomendado):
+    // $isValid = password_verify($passToCheck, $currentUser['PASS']); 
+    
+    // MODO TEXTO PLANO (Según tus tablas anteriores):
+    $isValid = ($passToCheck === $currentUser['PASS']);
+
+    echo json_encode(['valid' => $isValid]);
+    exit; // Detenemos la ejecución aquí para no cargar el resto de la página
+}
+// ------------------------------------------------------------------
+
+$msg = ""; $msgType = "";
+
+// 3. PROCESAR FORMULARIO
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && !isset($_POST['ajax_verify_pass'])) {
+    $nombre = trim($_POST['full_name']);
+    $email  = trim($_POST['email']);
+    
+    // Campos de contraseña
+    $currentPass = $_POST['current_password'] ?? '';
+    $newPass     = $_POST['new_password'] ?? '';
+
+    $valid = true;
+
+    // A. Validar Nombre
+    if (!preg_match("/^[a-zA-ZÁÉÍÓÚáéíóúñÑ\s]+$/", $nombre)) {
+        $msg = "El nombre contiene caracteres no permitidos.";
+        $msgType = "error";
+        $valid = false;
+    }
+
+    // B. Lógica de Cambio de Contraseña
+    $sql_pass = "";
+    $params = [];
+
+    // Si el usuario escribió algo en "Nueva Contraseña"
+    if (!empty($newPass)) {
+        // 1. Verificar que escribió la actual
+        if (empty($currentPass)) {
+            $msg = "Debes ingresar tu contraseña actual para cambiarla.";
+            $msgType = "error";
+            $valid = false;
+        } else {
+            // 2. Verificar que la actual sea correcta en BD
+            $stmt = $pdo->prepare("SELECT PASS FROM USERS WHERE ID_USER = :id");
+            $stmt->execute([':id' => $id_user]);
+            $dbUser = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // Cambiar a password_verify si usas hash
+            if ($currentPass !== $dbUser['PASS']) {
+                $msg = "La contraseña actual es incorrecta.";
+                $msgType = "error";
+                $valid = false;
+            }
+            // 3. Verificar RegEx de la NUEVA (Mayuscula inicial, min 8, 1 especial)
+            // Regex: ^[A-Z] (Inicia Mayus), (?=.*[\W_]) (Tiene especial), .{7,} (7 mas = 8 total)
+            elseif (!preg_match("/^[A-Z](?=.*[\W_]).{7,}$/", $newPass)) {
+                $msg = "La nueva contraseña no cumple los requisitos.";
+                $msgType = "error";
+                $valid = false;
+            } else {
+                // Todo correcto, preparamos SQL
+                // $newPassHash = password_hash($newPass, PASSWORD_DEFAULT); // Si usas hash
+                $sql_pass = ", PASS = :pass";
+                $params[':pass'] = $newPass; 
+            }
+        }
+    }
+
+    // C. GUARDAR SI ES VÁLIDO
+    if ($valid) {
+        try {
+            // Subida de imagen
+            $sql_img = "";
+            if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === 0) {
+                $allowed = ['jpg', 'jpeg', 'png', 'gif'];
+                $filename = $_FILES['profile_image']['name'];
+                $filetmp  = $_FILES['profile_image']['tmp_name'];
+                $ext      = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+
+                if (in_array($ext, $allowed)) {
+                    $newName = 'admin_' . $id_user . '_' . time() . '.' . $ext;
+                    $dest = __DIR__ . '/../../../public/img/profiles/' . $newName;
+
+                    if (!file_exists(__DIR__ . '/../../../public/img/profiles/')) {
+                        mkdir(__DIR__ . '/../../../public/img/profiles/', 0777, true);
+                    }
+
+                    if (move_uploaded_file($filetmp, $dest)) {
+                        $sql_img = ", PROFILE_IMAGE = :image";
+                        $params[':image'] = $newName;
+                        $_SESSION['PROFILE_IMAGE'] = $newName; 
+                    }
+                } else {
+                    $msg = "Formato de imagen no válido.";
+                    $msgType = "error";
+                    $valid = false;
+                }
+            }
+
+            if ($valid) {
+                $sql = "UPDATE USERS SET FULL_NAME = :name, EMAIL = :email $sql_img $sql_pass WHERE ID_USER = :id";
+                
+                $params[':name'] = $nombre;
+                $params[':email'] = $email;
+                $params[':id'] = $id_user;
+
+                $stmt = $pdo->prepare($sql);
+                if ($stmt->execute($params)) {
+                    $_SESSION['USER_NAME'] = $nombre;
+                    $msg = "Perfil actualizado correctamente.";
+                    $msgType = "success";
+                } else {
+                    $msg = "Error al guardar en la base de datos.";
+                    $msgType = "error";
+                }
+            }
+
+        } catch (Exception $e) {
+            $msg = "Error: " . $e->getMessage();
+            $msgType = "error";
+        }
+    }
+}
+
+// 4. OBTENER DATOS ACTUALES
+$stmt = $pdo->prepare("SELECT * FROM USERS WHERE ID_USER = :id");
+$stmt->execute([':id' => $id_user]);
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+// Visualización de foto
+$hasImage = false;
+$imgUrl = "";
+if (!empty($user['PROFILE_IMAGE'])) {
+    $filePath = __DIR__ . '/../../../public/img/profiles/' . $user['PROFILE_IMAGE'];
+    if (file_exists($filePath)) {
+        $hasImage = true;
+        $imgUrl = BASE_URL . "public/img/profiles/" . $user['PROFILE_IMAGE'];
+    }
+}
+
+require_once __DIR__ . '/../../../app/views/layout/header.php';
+?>
+
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<div class="container my-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold"><i class="bi bi-person-circle"></i> Mi Perfil</h2>
+        <a href="<?= BASE_URL ?>public/admin/index.php" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Volver al Dashboard
+        </a>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 mb-4">
+            <div class="card shadow-sm border-0 text-center p-4 h-100">
+                <div class="mb-3 d-flex justify-content-center align-items-center" style="min-height: 160px;">
+                    <?php if ($hasImage): ?>
+                        <img src="<?= $imgUrl ?>" alt="Foto" class="rounded-circle img-thumbnail shadow-sm" style="width: 150px; height: 150px; object-fit: cover;">
+                    <?php else: ?>
+                        <i class="bi bi-person-circle text-secondary" style="font-size: 9rem; line-height: 1;"></i>
+                    <?php endif; ?>
+                </div>
+                <h5 class="fw-bold text-dark"><?= htmlspecialchars($user['FULL_NAME']) ?></h5>
+                <p class="badge bg-dark mb-2">Administrador</p>
+                <br>
+                <small class="text-muted">Miembro desde: <?= date('M Y', strtotime($user['DATE_CREATED'])) ?></small>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-dark text-white fw-bold">
+                    <i class="bi bi-pencil-square"></i> Editar Información
+                </div>
+                <div class="card-body p-4">
+                    <form method="POST" enctype="multipart/form-data" id="profileForm">
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Nombre Completo</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light"><i class="bi bi-person"></i></span>
+                                    <input type="text" name="full_name" id="inputName" class="form-control" value="<?= htmlspecialchars($user['FULL_NAME']) ?>" required>
+                                </div>
+                                <div id="nameFeedback" class="form-text mt-1 small">
+                                    <i class="bi bi-info-circle"></i> Solo letras y espacios.
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Correo Electrónico</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light"><i class="bi bi-envelope"></i></span>
+                                    <input type="email" name="email" class="form-control" value="<?= htmlspecialchars($user['EMAIL']) ?>" required>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Cambiar Foto de Perfil</label>
+                            <input type="file" name="profile_image" class="form-control" accept="image/*">
+                            <div class="form-text text-muted">Se guardará en <strong>public/img/profiles/</strong>.</div>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <h5 class="text-danger fw-bold mb-3"><i class="bi bi-shield-lock"></i> Cambiar Contraseña</h5>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Contraseña Actual</label>
+                                <div class="input-group">
+                                    <input type="password" name="current_password" id="inputCurrentPass" class="form-control" placeholder="Ingresa tu contraseña actual">
+                                    <span class="input-group-text bg-white" id="iconCurrentPass">
+                                        <i class="bi bi-question-circle text-muted"></i>
+                                    </span>
+                                </div>
+                                <div class="form-text">Necesaria para autorizar cambios.</div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Nueva Contraseña</label>
+                                <input type="password" name="new_password" id="inputNewPass" class="form-control" placeholder="Nueva contraseña">
+                                <div id="passFeedback" class="form-text mt-1 small">
+                                    <i class="bi bi-info-circle"></i> Inicio Mayúscula, Min 8 chars, 1 Especial.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end mt-3">
+                            <button type="submit" id="btnSave" class="btn btn-primary px-4 fw-bold">
+                                <i class="bi bi-save"></i> Guardar Cambios
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // Elementos del DOM
+        const inputName = document.getElementById('inputName');
+        const nameFeedback = document.getElementById('nameFeedback');
+        
+        const inputCurrentPass = document.getElementById('inputCurrentPass');
+        const iconCurrentPass = document.getElementById('iconCurrentPass');
+
+        const inputNewPass = document.getElementById('inputNewPass');
+        const passFeedback = document.getElementById('passFeedback');
+
+        // Regex según tu solicitud:
+        // 1. Inicia Mayuscula: ^[A-Z]
+        // 2. Caracter especial: (?=.*[\W_])
+        // 3. Minimo 8 total: .{7,} (1 Mayus + 7 otros = 8)
+        const regexName = /^[a-zA-ZÁÉÍÓÚáéíóúñÑ\s]+$/;
+        const regexNewPass = /^[A-Z](?=.*[\W_]).{7,}$/; 
+
+        // 1. VALIDAR NOMBRE
+        inputName.addEventListener('input', function() {
+            const val = this.value;
+            if (regexName.test(val) && val.trim() !== "") {
+                this.classList.remove('is-invalid');
+                this.classList.add('is-valid');
+                nameFeedback.className = "form-text text-success fw-bold";
+                nameFeedback.innerHTML = '<i class="bi bi-check-circle-fill"></i> Nombre válido.';
+            } else {
+                this.classList.remove('is-valid');
+                this.classList.add('is-invalid');
+                nameFeedback.className = "form-text text-danger fw-bold";
+                nameFeedback.innerHTML = '<i class="bi bi-x-circle-fill"></i> Solo letras y espacios.';
+            }
+        });
+
+        // 2. VERIFICAR CONTRASEÑA ACTUAL (AJAX para mostrar paloma)
+        inputCurrentPass.addEventListener('keyup', function() {
+            const val = this.value;
+            
+            if (val === "") {
+                iconCurrentPass.innerHTML = '<i class="bi bi-question-circle text-muted"></i>';
+                this.classList.remove('is-valid', 'is-invalid');
+                return;
+            }
+
+            // Petición AJAX al mismo archivo
+            const formData = new FormData();
+            formData.append('ajax_verify_pass', val);
+
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.valid) {
+                    // Contraseña Correcta: Mostrar Paloma Verde
+                    this.classList.remove('is-invalid');
+                    this.classList.add('is-valid');
+                    iconCurrentPass.innerHTML = '<i class="bi bi-check-circle-fill text-success fs-5"></i>';
+                } else {
+                    // Contraseña Incorrecta
+                    this.classList.remove('is-valid');
+                    // Opcional: poner is-invalid, o dejar neutral hasta que envíe
+                    iconCurrentPass.innerHTML = '<i class="bi bi-x-circle-fill text-danger fs-5"></i>';
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        });
+
+        // 3. VALIDAR NUEVA CONTRASEÑA
+        inputNewPass.addEventListener('input', function() {
+            const val = this.value;
+
+            if (val === "") {
+                this.classList.remove('is-valid', 'is-invalid');
+                passFeedback.className = "form-text text-muted";
+                passFeedback.innerHTML = '<i class="bi bi-info-circle"></i> Inicio Mayúscula, Min 8 chars, 1 Especial.';
+                return;
+            }
+
+            if (regexNewPass.test(val)) {
+                this.classList.remove('is-invalid');
+                this.classList.add('is-valid');
+                passFeedback.className = "form-text text-success fw-bold";
+                passFeedback.innerHTML = '<i class="bi bi-check-circle-fill"></i> Contraseña fuerte.';
+            } else {
+                this.classList.remove('is-valid');
+                this.classList.add('is-invalid');
+                passFeedback.className = "form-text text-danger fw-bold";
+                passFeedback.innerHTML = '<i class="bi bi-x-circle-fill"></i> Debe iniciar con Mayúscula, tener 1 especial y min 8 chars.';
+            }
+        });
+    });
+
+    <?php if($msg != ""): ?>
+        Swal.fire({
+            icon: '<?= $msgType ?>',
+            title: '<?= $msg ?>',
+            toast: true, position: 'top-end', showConfirmButton: false, timer: 3000
+        });
+    <?php endif; ?>
+</script>
+
+<?php require_once __DIR__ . '/../../../app/views/layout/footer.php'; ?>
